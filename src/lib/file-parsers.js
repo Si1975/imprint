@@ -10,8 +10,8 @@
 export async function parsePDF(file) {
   const pdfjsLib = await import('pdfjs-dist')
 
-  // Set up the worker - use unpkg which mirrors npm directly
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
+  // Bundle the worker so local PDF import does not depend on a CDN.
+  pdfjsLib.GlobalWorkerOptions.workerSrc = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default
 
   const arrayBuffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
@@ -37,7 +37,7 @@ export async function parsePDF(file) {
  * @param {File} file - The EPUB file to parse
  * @returns {Promise<string>} The extracted text
  */
-export async function parseEPUB(file) {
+export async function parseEPUBDocument(file) {
   const ePub = (await import('epubjs')).default
 
   const arrayBuffer = await file.arrayBuffer()
@@ -47,6 +47,13 @@ export async function parseEPUB(file) {
   await book.loaded.spine
 
   let fullText = ''
+  let wordOffset = 0
+  const chapters = []
+  const navigation = await book.loaded.navigation
+  const metadata = await book.loaded.metadata
+  const toc = []
+  function collect(items = []) { for (const entry of items) { toc.push(entry); collect(entry.subitems); } }
+  collect(navigation?.toc)
 
   // Get spine items - the API varies between versions
   const spineItems = book.spine?.spineItems || book.spine?.items || []
@@ -69,15 +76,31 @@ export async function parseEPUB(file) {
         } else if (contents.documentElement) {
           text = contents.documentElement.textContent || ''
         }
-        fullText += text + ' '
+        const cleaned = cleanText(text)
+        if (cleaned) {
+          const entry = toc.find(t => t.href?.split('#')[0] === href.split('#')[0] || href.endsWith(t.href?.split('#')[0]))
+          const heading = typeof contents === 'string' ? new DOMParser().parseFromString(contents, 'text/html').querySelector('h1,h2,h3')?.textContent : contents.querySelector?.('h1,h2,h3')?.textContent
+          chapters.push({ title: entry?.label?.trim() || heading?.trim() || `Section ${chapters.length + 1}`, wordIndex: wordOffset })
+          fullText += cleaned + ' '
+          wordOffset += cleaned.split(/\s+/).length
+        }
       }
     } catch (e) {
-      console.warn('Could not load section:', e)
+      book.destroy?.()
+      throw new Error(`Could not import EPUB section ${item.href || item.url}: ${e.message}`)
     }
   }
 
   // Clean up the text
-  return cleanText(fullText)
+  book.destroy?.()
+  return { text: cleanText(fullText), title: metadata?.title, author: metadata?.creator, chapters }
+}
+
+export async function parseEPUB(file) { return (await parseEPUBDocument(file)).text }
+
+export async function parseDocument(file) {
+  if (file.name.toLowerCase().endsWith('.epub')) return parseEPUBDocument(file)
+  return { text: await parseFile(file), chapters: [] }
 }
 
 /**
@@ -107,6 +130,8 @@ export async function parseFile(file) {
     return parsePDF(file)
   } else if (fileName.endsWith('.epub')) {
     return parseEPUB(file)
+  } else if (/\.(txt|md)$/.test(fileName)) {
+    return cleanText(await file.text())
   } else {
     throw new Error(`Unsupported file type: ${fileName}`)
   }
@@ -117,5 +142,5 @@ export async function parseFile(file) {
  * @returns {string} Comma-separated list of supported extensions
  */
 export function getSupportedExtensions() {
-  return '.pdf,.epub'
+  return '.pdf,.epub,.txt,.md'
 }

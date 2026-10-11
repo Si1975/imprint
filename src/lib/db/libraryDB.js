@@ -1,15 +1,4 @@
-/**
- * libraryDB.js — IndexedDB data layer for Imprint
- *
- * Object Stores:
- *   library  — one record per book (metadata + optional cached word array for uploads)
- *   progress — one record per book (reading position, time spent)
- *   sessions — one record per reading session (for streak/history in ActivityDashboard)
- *
- * All exports return Promises so this module can be swapped for a
- * native SQLite adapter (Capacitor SQLite / wa-sqlite) in Phase 2
- * without touching any Svelte store or component code.
- */
+/** Personal books and progress in IndexedDB. Existing database/store names are retained. */
 
 const DB_NAME = 'imprint-library';
 const DB_VERSION = 1;
@@ -79,7 +68,9 @@ async function tx(storeName, mode, fn) {
     const transaction = db.transaction(storeName, mode);
     const store = transaction.objectStore(storeName);
     const req = fn(store);
-    req.onsuccess = () => resolve(req.result);
+    transaction.oncomplete = () => resolve(req.result);
+    transaction.onabort = () => reject(transaction.error);
+    transaction.onerror = () => reject(transaction.error);
     req.onerror = () => reject(req.error);
   });
 }
@@ -91,11 +82,11 @@ async function tx(storeName, mode, fn) {
  * @property {string}   book_id             — UUID or stable hash (PK)
  * @property {string}   title
  * @property {string}   author
- * @property {string}   file_type           — 'json'|'epub'|'pdf'|'txt'|'catalog'
+ * @property {string}   file_type           — 'epub'|'pdf'|'txt'|'md'|'paste'
  * @property {number}   total_words
- * @property {string[]|null} raw_text_array  — parsed words; null for catalog books (fetched on demand)
+ * @property {string[]|null} raw_text_array  — cached parsed words
  * @property {boolean}  is_custom_upload
- * @property {string}   source_origin       — 'local_upload'|'local_catalog'|'gutenberg_api'
+ * @property {string}   source_origin       — 'local_upload' (legacy sources are retained)
  * @property {string|null} external_source_id — slug or Gutenberg ID
  * @property {string|null} catalog_url      — URL to fetch raw text for catalog books
  * @property {number}   added_at            — timestamp
@@ -201,79 +192,3 @@ export async function getAllProgress() {
   return tx('progress', 'readonly', (store) => store.getAll());
 }
 
-// ── Sessions Store ───────────────────────────────────────────────────────────
-
-/**
- * @typedef {Object} SessionRecord
- * @property {number} [session_id]   — autoIncrement PK
- * @property {string} book_id
- * @property {number} start_timestamp
- * @property {number} end_timestamp
- * @property {number} words_read
- * @property {string} date           — ISO date string 'YYYY-MM-DD' for streak grouping
- */
-
-/**
- * Record a completed reading session.
- * @param {Omit<SessionRecord,'session_id'>} session
- * @returns {Promise<number>} — the new session_id
- */
-export async function recordSession(session) {
-  return tx('sessions', 'readwrite', (store) => store.add(session));
-}
-
-/**
- * Get all sessions for streak + history calculation.
- * @returns {Promise<SessionRecord[]>}
- */
-export async function getAllSessions() {
-  return tx('sessions', 'readonly', (store) => store.getAll());
-}
-
-/**
- * Aggregate stats across all sessions + progress records.
- * @returns {Promise<{totalMinutesRead: number, booksCompleted: number, currentStreak: number, weekHistory: number[]}>}
- */
-export async function getAggregateStats() {
-  const [sessions, progressRecords] = await Promise.all([
-    getAllSessions(),
-    getAllProgress(),
-  ]);
-
-  // Total time
-  const totalMinutesRead = progressRecords.reduce(
-    (sum, p) => sum + Math.floor((p.total_time_spent_seconds || 0) / 60),
-    0,
-  );
-
-  // Completed books
-  const booksCompleted = progressRecords.filter((p) => p.is_completed).length;
-
-  // Streak — consecutive distinct calendar days with at least one session
-  const daySet = new Set(sessions.map((s) => s.date));
-  const today = new Date().toISOString().slice(0, 10);
-  let streak = 0;
-  let checkDate = new Date();
-  while (true) {
-    const d = checkDate.toISOString().slice(0, 10);
-    if (daySet.has(d)) {
-      streak++;
-      checkDate.setDate(checkDate.getDate() - 1);
-    } else {
-      break;
-    }
-  }
-
-  // 7-day session minutes history
-  const weekHistory = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    const dateStr = d.toISOString().slice(0, 10);
-    const daySessions = sessions.filter((s) => s.date === dateStr);
-    return Math.round(
-      daySessions.reduce((sum, s) => sum + (s.end_timestamp - s.start_timestamp) / 60000, 0),
-    );
-  });
-
-  return { totalMinutesRead, booksCompleted, currentStreak: streak, weekHistory };
-}

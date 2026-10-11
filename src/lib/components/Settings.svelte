@@ -1,6 +1,4 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
-  import { isPremium, activateWithKey, deactivatePremium } from '../../stores/premiumStore.js';
 
   export let wordsPerMinute = 300;
   export let fadeEnabled = true;
@@ -20,28 +18,10 @@
     focusPosition = 50 - focusOffset;
   }
 
-  const dispatch = createEventDispatcher();
 
   // Quick WPM presets
   const wpmPresets = [200, 300, 400, 500];
 
-  // License activation
-  let licenseKeyInput = '';
-  let licenseError = '';
-  let licenseSuccess = false;
-
-  function handleActivateLicense() {
-    licenseError = '';
-    licenseSuccess = false;
-    const result = activateWithKey(licenseKeyInput);
-    if (result.success) {
-      licenseSuccess = true;
-      licenseKeyInput = '';
-      setTimeout(() => { licenseSuccess = false; }, 3000);
-    } else {
-      licenseError = result.error;
-    }
-  }
 </script>
 
 <div class="settings-view">
@@ -83,6 +63,8 @@
     </div>
   </section>
 
+  <details>
+    <summary>More reading options</summary>
   <!-- Display Section -->
   <section class="settings-section">
     <div class="section-header">
@@ -183,61 +165,9 @@
     {/if}
   </section>
 
-  <!-- Pro License Section -->
-  <section class="settings-section pro-section">
-    <div class="section-header">
-      <svg viewBox="0 0 24 24" fill="currentColor" class="section-icon pro-icon">
-        <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
-      </svg>
-      <span>Imprint Pro</span>
-    </div>
-
-    {#if $isPremium}
-      <div class="pro-active">
-        <div class="pro-check">✓</div>
-        <p>Pro is active. Enjoy unlimited access!</p>
-        <button class="deactivate-link" on:click={deactivatePremium}>Deactivate</button>
-      </div>
-    {:else}
-      <div class="pro-card">
-        <div class="pro-features">
-          <div class="feature-item">✅ Unlimited uploads</div>
-          <div class="feature-item">✅ Full Gutenberg catalog</div>
-          <div class="feature-item">✅ Reading stats & streaks</div>
-          <div class="feature-item">✅ Advanced typography</div>
-        </div>
-
-        <form on:submit|preventDefault={handleActivateLicense} class="license-form">
-          <input
-            type="text"
-            bind:value={licenseKeyInput}
-            placeholder="IMPRINT-PRO"
-            class="license-input"
-            class:error={!!licenseError}
-            class:success={licenseSuccess}
-          />
-          {#if licenseError}
-            <p class="form-error">{licenseError}</p>
-          {/if}
-          {#if licenseSuccess}
-            <p class="form-success">✓ License activated!</p>
-          {/if}
-          <button type="submit" class="activate-btn">Activate License</button>
-        </form>
-
-        <p class="license-hint">Demo key: <code>IMPRINT-PRO</code></p>
-      </div>
-    {/if}
-  </section>
-
-  <!-- App info -->
-  <div class="app-info">
-    <span>imprint v1.0.1</span>
-    <span>·</span>
-    <span>Zero-backend architecture</span>
-  </div>
+  </details>
+  <p class="hint-text">Your books stay on this device.</p>
 </div>
-
 <style>
   .settings-view {
     display: flex;
@@ -282,7 +212,6 @@
   }
 
   .section-icon { width: 18px; height: 18px; opacity: 0.7; }
-  .pro-icon { color: #ff4444 !important; opacity: 1 !important; }
 
   /* WPM Control */
   .wpm-control {
@@ -427,135 +356,4 @@
     line-height: 1.3;
   }
 
-  /* Pro section */
-  .pro-section { border-bottom: none; }
-
-  .pro-card {
-    background: #111;
-    border: 1px solid #1e1e1e;
-    border-radius: 16px;
-    padding: 1.25rem;
-  }
-
-  .pro-features {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.4rem;
-    margin-bottom: 1rem;
-  }
-
-  .feature-item {
-    background: #0a0a0a;
-    border: 1px solid #1a1a1a;
-    border-radius: 8px;
-    padding: 0.5rem 0.6rem;
-    font-size: 0.78rem;
-    color: #ccc;
-  }
-
-  .license-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .license-input {
-    width: 100%;
-    padding: 0.8rem 0.875rem;
-    background: #0a0a0a;
-    border: 1px solid #333;
-    border-radius: 10px;
-    color: #fff;
-    font-size: 0.95rem;
-    font-family: monospace;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    box-sizing: border-box;
-    transition: border-color 0.15s;
-  }
-
-  .license-input:focus { outline: none; border-color: #ff4444; }
-  .license-input.error { border-color: #ff4444; }
-  .license-input.success { border-color: #22c55e; }
-
-  .form-error { margin: 0; color: #ff4444; font-size: 0.78rem; }
-  .form-success { margin: 0; color: #22c55e; font-size: 0.78rem; }
-
-  .activate-btn {
-    width: 100%;
-    padding: 0.8rem;
-    background: #ff4444;
-    color: #fff;
-    border: none;
-    border-radius: 10px;
-    font-size: 0.95rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
-    margin-top: 0.25rem;
-  }
-
-  .activate-btn:hover { background: #ff6060; }
-
-  .license-hint {
-    margin: 0.6rem 0 0;
-    color: #444;
-    font-size: 0.75rem;
-    text-align: center;
-  }
-
-  .license-hint code {
-    color: #888;
-    background: #1a1a1a;
-    padding: 0.1rem 0.4rem;
-    border-radius: 4px;
-    font-family: monospace;
-  }
-
-  .pro-active {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 1.5rem;
-    background: #111;
-    border: 1px solid rgba(34, 197, 94, 0.15);
-    border-radius: 16px;
-    text-align: center;
-  }
-
-  .pro-check { font-size: 2rem; color: #22c55e; }
-  .pro-active p { margin: 0; color: #888; font-size: 0.9rem; }
-
-  .deactivate-link {
-    background: none;
-    border: none;
-    color: #555;
-    font-size: 0.78rem;
-    cursor: pointer;
-    text-decoration: underline;
-  }
-
-  /* App info */
-  .app-info {
-    display: flex;
-    justify-content: center;
-    gap: 0.4rem;
-    color: #333;
-    font-size: 0.7rem;
-    padding-top: 0.5rem;
-    font-family: monospace;
-  }
-
-  @media (max-width: 600px) {
-    .wpm-value { font-size: 3rem; }
-
-    .slider::-webkit-slider-thumb { width: 26px; height: 26px; }
-
-    .toggle { width: 56px; height: 32px; }
-    .toggle-thumb { width: 26px; height: 26px; }
-    .toggle.active .toggle-thumb { left: 26px; }
-
-    .pro-features { grid-template-columns: 1fr; }
-  }
 </style>

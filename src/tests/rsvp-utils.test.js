@@ -250,29 +250,29 @@ describe('getWordDelay', () => {
 describe('formatTimeRemaining', () => {
   it('should format time correctly', () => {
     // 300 words at 300 WPM = 1 minute
-    expect(formatTimeRemaining(300, 300)).toBe('1:00')
+    expect(formatTimeRemaining(300, 300)).toBe('00:01:00')
     // 150 words at 300 WPM = 30 seconds
-    expect(formatTimeRemaining(150, 300)).toBe('0:30')
+    expect(formatTimeRemaining(150, 300)).toBe('00:00:30')
     // 450 words at 300 WPM = 1.5 minutes
-    expect(formatTimeRemaining(450, 300)).toBe('1:30')
+    expect(formatTimeRemaining(450, 300)).toBe('00:01:30')
   })
 
   it('should pad seconds with leading zero', () => {
-    expect(formatTimeRemaining(15, 300)).toBe('0:03')
-    expect(formatTimeRemaining(25, 300)).toBe('0:05')
+    expect(formatTimeRemaining(15, 300)).toBe('00:00:03')
+    expect(formatTimeRemaining(25, 300)).toBe('00:00:05')
   })
 
   it('should return 0:00 for zero remaining words', () => {
-    expect(formatTimeRemaining(0, 300)).toBe('0:00')
+    expect(formatTimeRemaining(0, 300)).toBe('00:00:00')
   })
 
   it('should return 0:00 for invalid WPM', () => {
-    expect(formatTimeRemaining(100, 0)).toBe('0:00')
-    expect(formatTimeRemaining(100, -100)).toBe('0:00')
+    expect(formatTimeRemaining(100, 0)).toBe('00:00:00')
+    expect(formatTimeRemaining(100, -100)).toBe('00:00:00')
   })
 
   it('should handle negative remaining words', () => {
-    expect(formatTimeRemaining(-10, 300)).toBe('0:00')
+    expect(formatTimeRemaining(-10, 300)).toBe('00:00:00')
   })
 })
 

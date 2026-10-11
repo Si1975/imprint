@@ -1,10 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { libraryStore } from '../../stores/libraryStore.js';
-  import { isPremium } from '../../stores/premiumStore.js';
 
   export let currentFileName = '';
-  export let currentBookId = null;
   export let words = [];
   export let currentWordIndex = 0;
   export let progress = 0;
@@ -14,27 +11,6 @@
 
   const dispatch = createEventDispatcher();
 
-  $: ({ books } = $libraryStore);
-  $: recentBooks = books
-    .filter((b) => (b.last_read_at || 0) > 0)
-    .sort((a, b) => (b.last_read_at || 0) - (a.last_read_at || 0))
-    .slice(0, 3);
-
-  function getProgressPercent(book) {
-    return book._progress?.percentage_completed || 0;
-  }
-
-  function formatLastRead(ts) {
-    if (!ts) return '';
-    const d = new Date(ts);
-    const now = new Date();
-    const diffMs = now - d;
-    const diffDays = Math.floor(diffMs / 86400000);
-    if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  }
 </script>
 
 <div class="home-view">
@@ -83,7 +59,7 @@
     {#if words.length > 0}
       <button class="action-btn primary" on:click={() => dispatch('startreading')}>
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-        {currentWordIndex > 0 ? 'Continue Reading' : 'Start Reading'}
+        {currentWordIndex >= words.length ? 'Read Again' : currentWordIndex > 0 ? 'Continue Reading' : 'Start Reading'}
       </button>
     {/if}
     <button class="action-btn secondary" on:click={() => dispatch('loadcontent')}>
@@ -91,30 +67,6 @@
       Load Content
     </button>
   </div>
-
-  <!-- Recently Read -->
-  {#if recentBooks.length > 0}
-    <div class="recent-section">
-      <h3 class="section-label">Continue reading</h3>
-      <div class="recent-list">
-        {#each recentBooks as book (book.book_id)}
-          <button class="recent-card" class:active={book.book_id === currentBookId} on:click={() => dispatch('openbook', { book })}>
-            <span class="recent-emoji">{book.cover_emoji || '📖'}</span>
-            <div class="recent-info">
-              <span class="recent-title">{book.title}</span>
-              <span class="recent-meta">{book.author}</span>
-            </div>
-            <div class="recent-right">
-              {#if getProgressPercent(book) > 0}
-                <span class="recent-pct">{Math.round(getProgressPercent(book))}%</span>
-              {/if}
-              <span class="recent-date">{formatLastRead(book.last_read_at)}</span>
-            </div>
-          </button>
-        {/each}
-      </div>
-    </div>
-  {/if}
 
   <!-- Loading indicator -->
   {#if isLoadingFile}
@@ -124,15 +76,7 @@
     </div>
   {/if}
 
-  {#if !$isPremium}
-    <button class="pro-banner" on:click={() => dispatch('showpro')}>
-      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
-      <span>Activate Pro — Unlimited books + stats</span>
-      <svg viewBox="0 0 24 24" fill="currentColor" class="chevron"><path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z"/></svg>
-    </button>
-  {/if}
 </div>
-
 <style>
   .home-view {
     display: flex;
@@ -329,54 +273,6 @@
     color: #fff;
   }
 
-  /* Recent */
-  .recent-section {
-    width: 100%;
-  }
-
-  .section-label {
-    margin: 0 0 0.6rem;
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: #555;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .recent-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .recent-card {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    background: #111;
-    border: 1px solid #1e1e1e;
-    border-radius: 12px;
-    padding: 0.75rem 0.875rem;
-    cursor: pointer;
-    text-align: left;
-    transition: all 0.15s;
-    width: 100%;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .recent-card:hover { border-color: #333; background: #161616; }
-  .recent-card.active { border-color: #ff4444; }
-
-  .recent-emoji { font-size: 1.5rem; line-height: 1; flex-shrink: 0; }
-
-  .recent-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .recent-title { font-size: 0.875rem; font-weight: 500; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .recent-meta { font-size: 0.7rem; color: #555; margin-top: 0.1rem; }
-
-  .recent-right { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; gap: 0.15rem; }
-  .recent-pct { font-size: 0.75rem; color: #ff4444; font-family: monospace; font-weight: 600; }
-  .recent-date { font-size: 0.65rem; color: #444; font-family: monospace; }
-
   /* Loading toast */
   .loading-toast {
     display: flex;
@@ -403,35 +299,4 @@
 
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Pro banner */
-  .pro-banner {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    padding: 0.875rem 1rem;
-    background: rgba(255, 68, 68, 0.04);
-    border: 1px solid rgba(255, 68, 68, 0.15);
-    border-radius: 12px;
-    color: #ff4444;
-    cursor: pointer;
-    font-size: 0.85rem;
-    font-weight: 500;
-    transition: all 0.2s;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .pro-banner:hover {
-    background: rgba(255, 68, 68, 0.08);
-    border-color: rgba(255, 68, 68, 0.25);
-  }
-
-  .pro-banner svg {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-  }
-
-  .pro-banner span { flex: 1; text-align: left; }
-  .pro-banner .chevron { width: 16px; height: 16px; opacity: 0.5; }
 </style>

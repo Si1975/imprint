@@ -1,73 +1,46 @@
-# Product Roadmap & Success Matrix: Imprint
-**Project Vision:** An instant, zero-friction portal to speed-read the entire public domain, focusing on a clean, distraction-free "Zen Mode" with robust mobile-first usability.
+# Imprint: a reader I want to use
 
----
+Open a book. Read comfortably. Come back to the same place.
 
-## Phase 1: The Core Web App & Local-First Foundation
-*Focus: Engineering stability, user experience, and low-maintenance architecture.*
+Imprint is a small personal RSVP reader and a hobby first. An optional one-time paid store release comes only after it is enjoyable and dependable for everyday use. There is no growth target or release deadline.
 
-### What to Expect (Deliverables)
-- [x] **Fully Overhauled Svelte Core:** A responsive web application optimized specifically for mobile viewports (retaining custom font-scaling and Focus Shift Left math).
-- [x] **Zero-Backend Architecture:** No server costs, no cloud databases, and no forced user logins. All user data, uploads, and reading progress reside entirely on the local device via **IndexedDB**.
-- [x] **The Ingestion Pipeline:** Clean support for custom text copy-pasting (up to 10,000 words on the free tier) and single-file local uploads (EPUB/PDF/TXT/MD).
-- [x] **The Precision Navigation Deck:** Refined reading controls layout (`[-5] [-1] | [▶/⏸] [■] | [+1] [+5]`) featuring adaptive punctuation micro-pauses and word-index jumping.
-- [x] **The Premium State Gate:** A simulated local license key switch (`IMPRINT-PRO`) in settings that unlocks advanced typography, multi-book shelf layouts, and the reading analytics dashboard.
-- [x] **Lazy-Loaded Classics Catalog:** A curated collection of 5 complete public domain books hosted as static public assets and fetched asynchronously to prevent heavy initial bundle loads.
-- [ ] **Custom Themes:** Themes with some presets and the ability to customize fonts, colors, and backgrounds.
-- [ ] **Contextual Pause:** Pause in reading mode to display the previous and next few words so that if words were missed it's easy to catch up.
-- [ ] **Save Pasted Text:** Ability to save pasted text into the library with a title/author (optional).
-- [ ] **Customizable Controls:** Customizable control set for reading mode so users can have preferred controls.
-- [x] **Keyboard Shortcut Support:** Full keyboard support for navigation and controls when using the app on desktop browsers.
-- [ ] **Global Reading Goals:** Users can set daily or weekly reading goals (in time or word count) to build reading habits, tracked globally across all books in their library.
-- [ ] **Multi-Language Support:** Basic UI localization for popular languages and improved handling of non-English text flow in the speed reader.
-- [x] **Name and Branding:** App name officially decided as **Imprint** (Tagline: *"Don't read it, imprint it."*). Logo and visual assets to be created.
+## The core
 
-### What Success Looks Like in Phase 1
-- [x] **Performance:** The app loads instantly, compiles into 100% static client assets, and costs **$0/month** to host (Vercel/Netlify).
-- [x] **UX Immersion:** A user can land on the site and begin reading a classic story or their own text within two clicks without hitting a tracking block.
-- [x] **Persistence Proof:** Closing the browser mid-book and returning days later places the reader at the exact word token where they left off, every time.
-- [x] **Asynchronous Database Foundation:** The storage layers are cleanly decoupled using async Promises, proving ready to interface with mobile storage wrappers in Phase 2.
-- [x] **The Infinite Library Integration:** Hooking the unified ingestion channel into the **Gutendex API** (Project Gutenberg) to offer live, client-side searching and streaming of over 70,000 classics.
-- [x] **Personal Library:** Users can import their own books (EPUB, PDF, TXT, MD) and read them in the app and download from the Infinite Library to build their personal collection of classics. Users can then organize, browse, search, and read their personal collection of classics.
-- [x] **Progress Tracking:** Users can track their reading progress and stats, including words read per minute, pages read, and time spent reading, as well as book tracking, and personal notes. 
+- A personal library of imported EPUB, text-based PDF, TXT and Markdown files.
+- Save pasted text as a book, without word limits.
+- Comfortable dark RSVP reading, adjustable speed, punctuation pauses and existing display controls.
+- Book identity, automatic reading checkpoints, safe book switching and saved settings.
+- EPUB section/chapter selection and a short context line while paused.
+- Everything stays on the device. No accounts or content service.
 
----
+## Current implementation
 
-## ⚠️ Pre-Release: Replace CORS Proxy Before App Store Submission
+The basics above are implemented in the source. A passing build and automated checks are useful evidence, but do not mean mobile release readiness. EPUB navigation currently maps TOC labels to spine sections; multiple TOC anchors within one section are not separate navigation targets. Old imported EPUBs must be reimported to gain chapter metadata. Browser data can still be cleared or evicted.
 
-> **Action required before pushing to iOS/Android app stores or any production hosting (other than Docker with nginx).**
+## Next: use it myself
 
-The Explore tab's Gutendex API integration currently uses **corsproxy.io** as a fallback CORS proxy in production builds. This is fine for development and web previews, but introduces a third-party dependency with potential rate limits and reliability concerns.
+- [ ] Read several chapters of a real novel on Android, then keep using it for a week.
+- [ ] Check resume after backgrounding, reopening and switching between two books.
+- [ ] Check a very short session, a completed book, chapter jumps, deletion and a failed import.
+- [ ] Try several real EPUBs, including nested TOCs and chapters sharing a spine file; improve chapter mapping only where it affects actual books.
+- [ ] Verify PDF extraction and bundled worker offline. Scanned PDFs requiring OCR are out of scope.
+- [ ] Verify airplane-mode cold start and app updates on the packaged Android app and web preview.
+- [ ] Test touch targets, font sizes and long words on the actual phone.
+- [ ] Fix annoyances encountered during reading before adding features.
 
-**Before release, choose one of these options:**
-1. **Deploy a Cloudflare Worker** (~5 min setup, free tier) as your own lightweight CORS proxy — most reliable.
-2. **Use the Docker/nginx setup** which already includes proxy rules in `docker/nginx.conf` — works if you self-host.
-3. **Deploy a small DigitalOcean Function** alongside your existing DO App Platform config.
+## Optional: share or sell it
 
-The relevant code is in [`src/lib/gutendexApi.js`](src/lib/gutendexApi.js) — search for `corsproxy.io` to find the two places that need updating. Replace the `proxyTextUrl()` and `gutendexUrl()` functions' production branches with your own proxy endpoint.
+- [ ] Start with the already-packaged Android app; consider iOS only after the reader is proven and if the extra maintenance is worthwhile.
+- [ ] Make a small private tester build and respond to repeated reading problems.
+- [ ] Prepare honest store screenshots, a short description, privacy information and support contact.
+- [ ] Decide whether to charge once for the whole app. Choose a price near release; avoid subscriptions, ads, artificial reading limits and a second Pro edition.
+- [ ] Check current store requirements and test the packaged release before submission.
+- [ ] Consider simple export/import backup only if device migration becomes a real need.
 
----
+## Removed from scope
 
-## Phase 2: The Infinite Library & Mobile App Store Launch
-*Focus: Content scaling, distribution, native packaging, and monetization conversion.*
+Gutenberg/Gutendex discovery, bundled classics, CORS proxies, licence keys, premium gates, analytics dashboards, streaks, reading goals, ads, notifications, share cards, cloud services and a speculative SQLite migration.
 
-### What to Expect (Deliverables)
-*   **Native App Packaging:** Compiling the production-ready code into high-performance native iOS and Android packages via **Capacitor**.
-*   **The Mobile SQLite Engine:** Dropping a native SQLite storage wrapper into the existing asynchronous `sqliteAdapter.js` slot to provide unbreakable library storage.
-*   **Storefront Monetization:** Wiring the internal premium state store to native mobile billing systems (**StoreKit / Google Play Billing**) using a unified service like **RevenueCat**.
-*   **Soft Ad Integration:** Placing a 5-second skippable ad interstitial only when starting a new text file or selecting a new library book on the free tier.
-*   **Adsense Ads:** Add Adsense ads to the web app preview, consider for mobile release as well.
-*   **App Store Assets:** Create assets for the app store including screenshots, promo video, and app description.
-*   **Shareable Progress Cards:** Generate branded images of reading milestones (e.g., "I read X in Y hours") to share on social media, driving organic growth.
-*   **Local Push Notifications:** Remind users to hit their daily reading goals (handled entirely on-device without a server).
+Notes, dictionaries, theme builders, localization and customizable control layouts have no planned phase. Add something only when it resolves a recurring annoyance and fits into a small evening's work.
 
-### Optional Future Features
-*   **Offline Dictionary:** Integrate with an offline dictionary to allow users to look up word definitions while reading.
-*   **Notes and Highlights:** Allow users to take notes and highlight text while reading.
-*   **Multiple Reading Languages:** Allow users to read books in multiple languages.
-
-
-### What Success Looks Like in Phase 2
-*   **The Viral Marketing Loop:** Launching short-form videos ("Beowulf in 4 minutes") showcasing the flashing reader interface, driving continuous organic traffic straight to the app storefronts.
-*   **Subscription-Fatigue Alternative:** Positioning the app successfully as a consumer-friendly **"Pay Once, Own Forever" Lifetime License ($4.99–$9.99)** to capture users tired of monthly reading app costs.
-*   **Zero Running Costs:** Maintaining a highly scalable business model where processing and storage occur entirely client-side, translating all premium app purchases directly into pure side income.
+Success means I look forward to opening Imprint and it remembers my book and place. A few happy paying readers would be a bonus.

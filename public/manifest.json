@@ -1,7 +1,7 @@
 {
-  "name": "Speeder Read",
-  "short_name": "SpeederRead",
-  "description": "A speed reading app.",
+  "name": "Imprint",
+  "short_name": "Imprint",
+  "description": "Read your own books comfortably, one word at a time.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",

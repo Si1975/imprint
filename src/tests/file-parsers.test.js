@@ -6,6 +6,7 @@ function createMockFile(content, name, type) {
   return {
     name,
     type,
+    text: async () => content,
     arrayBuffer: () => Promise.resolve(new ArrayBuffer(content.length))
   }
 }
@@ -17,6 +18,8 @@ vi.mock('pdfjs-dist', () => ({
   getDocument: vi.fn()
 }))
 
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.mjs' }))
+
 vi.mock('epubjs', () => ({
   default: vi.fn()
 }))
@@ -27,7 +30,7 @@ import { parseFile, getSupportedExtensions } from '../lib/file-parsers.js'
 describe('getSupportedExtensions', () => {
   it('should return supported file extensions', () => {
     const extensions = getSupportedExtensions()
-    expect(extensions).toBe('.pdf,.epub')
+    expect(extensions).toBe('.pdf,.epub,.txt,.md')
   })
 
   it('should include pdf extension', () => {
@@ -42,10 +45,10 @@ describe('getSupportedExtensions', () => {
 })
 
 describe('parseFile', () => {
-  it('should throw error for unsupported file types', async () => {
+  it('should read plain text files', async () => {
     const file = createMockFile('content', 'test.txt', 'text/plain')
 
-    await expect(parseFile(file)).rejects.toThrow('Unsupported file type')
+    await expect(parseFile(file)).resolves.toBe('content')
   })
 
   it('should throw error for doc files', async () => {
@@ -63,7 +66,7 @@ describe('parseFile', () => {
   it('should handle files with uppercase extensions', async () => {
     const file = createMockFile('content', 'test.TXT', 'text/plain')
 
-    await expect(parseFile(file)).rejects.toThrow('Unsupported file type: test.txt')
+    await expect(parseFile(file)).resolves.toBe('content')
   })
 })
 
@@ -227,7 +230,7 @@ describe('parseEPUB', () => {
     expect(result).toBe('Chapter One Chapter Two')
   })
 
-  it('should handle failed section loads gracefully', async () => {
+  it('should reject incomplete EPUB imports', async () => {
     const epubjs = await import('epubjs')
 
     const mockSection1 = { href: 'broken.xhtml' }
@@ -252,9 +255,7 @@ describe('parseEPUB', () => {
     const file = createMockFile('fake epub content', 'partial.epub', 'application/epub+zip')
 
     // Should not throw, should continue with other sections
-    const result = await parseFile(file)
-
-    expect(result).toBe('Working chapter')
+    await expect(parseFile(file)).rejects.toThrow('Could not import EPUB section broken.xhtml')
   })
 })
 
@@ -322,3 +323,23 @@ describe('text cleaning', () => {
     expect(result).toBe('What? Really!')
   })
 })
+
+describe('EPUB document structure', () => {
+ it('keeps title, author, nested TOC labels and exact section offsets', async () => {
+  const epubjs = await import('epubjs');
+  const { parseEPUBDocument } = await import('../lib/file-parsers.js');
+  const destroy = vi.fn();
+  epubjs.default.mockReturnValue({
+   ready: Promise.resolve(),
+   loaded: { spine: Promise.resolve(), metadata: Promise.resolve({ title: 'A novel', creator: 'A writer' }), navigation: Promise.resolve({ toc: [{ href: 'one.xhtml', label: 'Opening', subitems: [{ href: 'two.xhtml', label: 'Next chapter' }] }] }) },
+   spine: { spineItems: [{ href: 'one.xhtml' }, { href: 'two.xhtml' }] },
+   load: async href => href === 'one.xhtml' ? '<body>First three words</body>' : '<body>Another section</body>',
+   destroy,
+  });
+  const result = await parseEPUBDocument(createMockFile('', 'novel.epub', 'application/epub+zip'));
+  expect(result.title).toBe('A novel');
+  expect(result.author).toBe('A writer');
+  expect(result.chapters).toEqual([{ title: 'Opening', wordIndex: 0 }, { title: 'Next chapter', wordIndex: 3 }]);
+  expect(destroy).toHaveBeenCalledOnce();
+ });
+});

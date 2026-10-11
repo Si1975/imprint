@@ -7,15 +7,8 @@
     formatTimeRemaining,
     shouldPauseAtWord,
   } from "./lib/rsvp-utils.js";
-  import { parseFile } from "./lib/file-parsers.js";
-  import {
-    saveSession,
-    loadSession,
-    clearSession,
-    hasSession,
-    saveFileProgress,
-    loadFileProgress,
-  } from "./lib/progress-storage.js";
+  import { parseDocument } from "./lib/file-parsers.js";
+  import { loadSession, clearSession } from "./lib/progress-storage.js";
   import RSVPDisplay from "./lib/components/RSVPDisplay.svelte";
   import Controls from "./lib/components/Controls.svelte";
   import ProgressBar from "./lib/components/ProgressBar.svelte";
@@ -23,13 +16,10 @@
   import BottomNav from "./lib/components/BottomNav.svelte";
   import HomeView from "./lib/components/HomeView.svelte";
   import Library from "./lib/components/Library.svelte";
-  import Explore from "./lib/components/Explore.svelte";
   import Settings from "./lib/components/Settings.svelte";
-  import ActivityDashboard from "./lib/components/ActivityDashboard.svelte";
   import { extractWordFrame } from "./lib/rsvp-utils.js";
   import { libraryStore } from "./stores/libraryStore.js";
-  import { isPremium, activateWithKey, premiumState } from "./stores/premiumStore.js";
-  import { ingestLocalFile, ingestCatalogBook } from "./lib/ingestor.js";
+  import { ingestLocalFile } from "./lib/ingestor.js";
 
   // ── Navigation ─────────────────────────────────────────────────────────────
   let activeTab = 'home';
@@ -37,11 +27,12 @@
 
   // ── RSVP State ─────────────────────────────────────────────────────────────
   let frameWordCount = 1;
-  let text = `Rapid serial visual presentation (RSVP) is a scientific method for studying the timing of vision. In RSVP, a sequence of stimuli is shown to an observer at one location in their visual field. This technique has been adapted for speed reading applications, where words are displayed one at a time at a fixed point, eliminating the need for eye movements and potentially increasing reading speed significantly.`;
+  let text = "";
   let words = [];
   let currentWordIndex = 0;
   let isPlaying = false;
   let isPaused = false;
+  let readerOpen = false;
   let progress = 0;
   let isLoadingFile = false;
   let loadingMessage = "";
@@ -51,8 +42,18 @@
   let currentBookId = null;
 
   // Session tracking for DB
-  let sessionStartTime = null;
-  let sessionStartIndex = 0;
+  let chapters = [];
+  let checkpointTimer;
+  let periodicTimeout;
+  let lastPeriodicIndex = -1;
+  let saveQueue = Promise.resolve();
+  let ready = false;
+  let saveError = '';
+  $: currentChapter = chapters.filter(c => c.wordIndex <= currentWordIndex).at(-1);
+  $: if (ready) persistSettings({ wordsPerMinute, fadeEnabled, fadeDuration, pauseOnPunctuation, punctuationPauseMultiplier, wordLengthWPMMultiplier, pauseAfterWords, pauseDuration, frameWordCount, focusPosition });
+  function persistSettings(settings) {
+    try { localStorage.setItem('imprint-settings', JSON.stringify(settings)); } catch { saveError = 'Could not save settings on this device.'; }
+  }
 
   // Settings
   let wordsPerMinute = 300;
@@ -82,7 +83,7 @@
     words.length - currentWordIndex,
     wordsPerMinute,
   );
-  $: isFocusMode = isPlaying || isPaused || isFinished;
+  $: isFocusMode = readerOpen;
   $: isFinished =
     !isPlaying &&
     !isPaused &&
@@ -114,13 +115,14 @@
       isPaused = false;
       if (intervalId) { clearTimeout(intervalId); intervalId = null; }
       saveCurrentSession();
-      flushSessionToDB();
+
       return;
     }
 
-    if (shouldPauseAtWord(currentWordIndex, pauseAfterWords)) {
+    if (shouldPauseAtWord(currentWordIndex, pauseAfterWords) && lastPeriodicIndex !== currentWordIndex) {
+      lastPeriodicIndex = currentWordIndex;
       isPaused = true;
-      setTimeout(() => {
+      periodicTimeout = setTimeout(() => {
         if (isPlaying) { isPaused = false; scheduleNextWord(); }
       }, pauseDuration);
       return;
@@ -139,7 +141,7 @@
       isPaused = false;
       if (intervalId) { clearTimeout(intervalId); intervalId = null; }
       saveCurrentSession();
-      flushSessionToDB();
+
       return;
     }
 
@@ -153,12 +155,12 @@
   }
 
   function start() {
+    readerOpen = true;
     if (words.length === 0) parseText();
     if (words.length === 0) return;
     isPlaying = true;
     isPaused = false;
-    sessionStartTime = Date.now();
-    sessionStartIndex = currentWordIndex;
+
     showNextWord();
   }
 
@@ -166,8 +168,9 @@
     isPlaying = false;
     isPaused = true;
     if (intervalId) { clearTimeout(intervalId); intervalId = null; }
+    clearTimeout(periodicTimeout);
     saveCurrentSession();
-    flushSessionToDB();
+
   }
 
   function resume() {
@@ -176,215 +179,96 @@
     } else if (currentWordIndex < words.length) {
       isPlaying = true;
       isPaused = false;
-      sessionStartTime = Date.now();
-      sessionStartIndex = currentWordIndex;
+
       scheduleNextWord();
     }
   }
 
   function stop() {
+    readerOpen = false;
     saveCurrentSession();
-    flushSessionToDB();
+
     isPlaying = false;
     isPaused = false;
+    clearTimeout(periodicTimeout);
     wordOpacity = 1;
     if (intervalId) { clearTimeout(intervalId); intervalId = null; }
-    if (isFinished) {
-      currentWordIndex = 0;
-      progress = 0;
-    }
+
   }
 
   function restart() {
     stop();
     currentWordIndex = 0;
     progress = 0;
+    lastPeriodicIndex = -1;
     start();
   }
 
-  // ── DB session helpers ─────────────────────────────────────────────────────
-
-  async function flushSessionToDB() {
-    if (!currentBookId || !sessionStartTime) return;
-    const endTime = Date.now();
-    const wordsRead = Math.max(0, currentWordIndex - sessionStartIndex);
-    if (wordsRead < 5) return;
-
-    try {
-      await libraryStore.recordSession(
-        currentBookId, sessionStartTime, endTime, wordsRead,
-      );
-      await libraryStore.saveProgress(
-        currentBookId, currentWordIndex, words.length,
-        Math.round((endTime - sessionStartTime) / 1000),
-        currentWordIndex >= words.length,
-      );
-    } catch (e) {
-      console.warn("[Imprint] DB flush failed:", e);
-    }
-
-    sessionStartTime = null;
-    sessionStartIndex = currentWordIndex;
+  // Saves are serialized and capture book identity before asynchronous work.
+  function saveCurrentSession() {
+    if (!currentBookId || !words.length) return saveQueue;
+    const id = currentBookId, index = currentWordIndex, total = words.length;
+    saveQueue = saveQueue.catch(() => {}).then(() => libraryStore.saveProgress(id, index, total));
+    saveQueue.then(() => { saveError = ''; }, () => { saveError = 'Could not save your place. Keep the app open and try again.'; });
+    return saveQueue;
   }
 
-  // ── File / text loading ───────────────────────────────────────────────────
-
-  function handleTextApply(event) {
-    text = event.detail.text;
-    currentFileName = "Pasted Text";
-    currentBookId = null;
+  async function switchBook(book, begin = false) {
     stop();
-    parseText();
+    await saveCurrentSession();
+    await libraryStore.addBook({ ...book, last_read_at: Date.now() });
+    await libraryStore.setActiveBook(book.book_id);
+    const saved = await libraryStore.getProgress(book.book_id);
+    currentBookId = book.book_id;
+    currentFileName = book.title;
+    words = book.raw_text_array;
+    text = words.join(' ');
+    chapters = book.chapters || [];
+    currentWordIndex = Math.max(0, Math.min(saved?.current_word_index || 0, words.length));
+    progress = currentWordIndex / words.length * 100;
+    lastPeriodicIndex = -1;
     showTextInput = false;
+    activeTab = 'home';
+    if (begin && currentWordIndex < words.length) start();
+  }
+
+  async function handleTextApply(event) {
+    isLoadingFile = true;
+    try {
+      const rawText = event.detail.text;
+      const title = rawText.trim().split(/\s+/).slice(0, 6).join(' ') || 'Pasted text';
+      await switchBook(await ingestLocalFile({ title, fileType: 'paste', rawText }), true);
+    } catch (error) { loadingMessage = error.message; }
+    finally { isLoadingFile = false; }
   }
 
   async function handleFileSelect(event) {
     const file = event.detail.file;
     if (!file) return;
-
     isLoadingFile = true;
-    loadingMessage = `Loading ${file.name}...`;
-
+    loadingMessage = `Opening ${file.name}…`;
     try {
-      const rawText = await parseFile(file);
-      const result = await ingestLocalFile({
-        title: file.name.replace(/\.[^.]+$/, ""),
-        author: "Unknown",
-        fileType: file.name.endsWith(".epub")
-          ? "epub"
-          : file.name.endsWith(".pdf")
-            ? "pdf"
-            : "txt",
-        rawText,
-        isCustomUpload: true,
-      });
-
-      if (!result.success) throw new Error(result.error || "Failed to parse file");
-
-      if (result.wasTruncated) {
-        loadingMessage = `⚠️ Free tier: showing first ${result.words.length.toLocaleString()} of ${result.originalWordCount.toLocaleString()} words. Activate Pro for unlimited.`;
-        setTimeout(() => { loadingMessage = ""; }, 4000);
-      }
-
-      words = result.words;
-      text = rawText;
-      currentFileName = file.name;
-      currentBookId = result.book.book_id;
-
-      await libraryStore.addBook(result.book);
-
-      const savedProg = await libraryStore.getProgress(result.book.book_id);
-      if (savedProg && savedProg.current_word_index > 0) {
-        currentWordIndex = Math.min(savedProg.current_word_index, words.length);
-        progress = (currentWordIndex / words.length) * 100;
-      } else {
-        currentWordIndex = 0;
-        progress = 0;
-      }
-
-      showTextInput = false;
-    } catch (error) {
-      console.error("Error parsing file:", error);
-      loadingMessage = `Error: ${error.message}`;
-      setTimeout(() => { loadingMessage = ""; }, 3000);
-    } finally {
-      isLoadingFile = false;
-    }
+      const parsed = await parseDocument(file);
+      const book = await ingestLocalFile({ title: parsed.title || file.name.replace(/\.[^.]+$/, ''), author: parsed.author || 'Unknown', fileType: file.name.split('.').at(-1).toLowerCase(), rawText: parsed.text, chapters: parsed.chapters });
+      await switchBook(book, true);
+      loadingMessage = '';
+    } catch (error) { loadingMessage = error.message; }
+    finally { isLoadingFile = false; }
   }
-
-  // ── Library: open a book ──────────────────────────────────────────────────
 
   async function openBook(event) {
-    const book = event.detail.book;
     isLoadingFile = true;
-    loadingMessage = `Loading ${book.title}…`;
-
-    try {
-      if (book.source_origin === "local_catalog") {
-        const result = await ingestCatalogBook(book);
-        if (!result.success) throw new Error(result.error);
-        words = result.words;
-        text = words.join(" ");
-        currentFileName = book.title;
-        currentBookId = book.book_id;
-        await libraryStore.addBook({
-          ...result.book,
-          total_words: result.words.length,
-          raw_text_array: null,
-        });
-      } else if (book.raw_text_array && book.raw_text_array.length > 0) {
-        words = book.raw_text_array;
-        text = words.join(" ");
-        currentFileName = book.title;
-        currentBookId = book.book_id;
-      } else {
-        throw new Error("Book has no text content.");
-      }
-
-      const savedProg = await libraryStore.getProgress(book.book_id);
-      if (savedProg && savedProg.current_word_index > 0) {
-        currentWordIndex = Math.min(savedProg.current_word_index, words.length);
-        progress = (currentWordIndex / words.length) * 100;
-      } else {
-        currentWordIndex = 0;
-        progress = 0;
-      }
-
-      stop();
-      await libraryStore.setActiveBook(book.book_id);
-
-      // After loading, switch to home and start reading
-      activeTab = 'home';
-    } catch (err) {
-      console.error("[Imprint] openBook failed:", err);
-      loadingMessage = `Error: ${err.message}`;
-      setTimeout(() => { loadingMessage = ""; }, 3000);
-    } finally {
-      isLoadingFile = false;
-      loadingMessage = "";
-    }
+    try { await switchBook(event.detail.book, true); }
+    catch (error) { saveError = error.message; }
+    finally { isLoadingFile = false; }
   }
 
-  // ── Session storage ───────────────────────────────────────────────────────
-
-  function saveCurrentSession() {
-    if (words.length === 0) return false;
-    if (currentFileName && currentFileName !== "Pasted Text" && !currentBookId) {
-      saveFileProgress(currentFileName, currentWordIndex, words.length);
-    }
-    return saveSession({
-      text,
-      currentWordIndex,
-      totalWords: words.length,
-      settings: {
-        wordsPerMinute, fadeEnabled, fadeDuration,
-        pauseOnPunctuation, punctuationPauseMultiplier,
-        wordLengthWPMMultiplier, pauseAfterWords, pauseDuration,
-        frameWordCount, focusPosition,
-      },
-    });
-  }
-
-  function loadSavedSession() {
-    const session = loadSession();
-    if (!session) return false;
-    text = session.text;
-    parseText();
-    currentWordIndex = session.currentWordIndex;
-    progress = (currentWordIndex / words.length) * 100;
-    if (session.settings) {
-      wordsPerMinute = session.settings.wordsPerMinute ?? wordsPerMinute;
-      fadeEnabled = session.settings.fadeEnabled ?? fadeEnabled;
-      fadeDuration = session.settings.fadeDuration ?? fadeDuration;
-      pauseOnPunctuation = session.settings.pauseOnPunctuation ?? pauseOnPunctuation;
-      punctuationPauseMultiplier = session.settings.punctuationPauseMultiplier ?? punctuationPauseMultiplier;
-      wordLengthWPMMultiplier = session.settings.wordLengthWPMMultiplier ?? wordLengthWPMMultiplier;
-      pauseAfterWords = session.settings.pauseAfterWords ?? pauseAfterWords;
-      pauseDuration = session.settings.pauseDuration ?? pauseDuration;
-      frameWordCount = session.settings.frameWordCount ?? frameWordCount;
-      focusPosition = session.settings.focusPosition ?? focusPosition;
-    }
-    return true;
+  function selectChapter(event) {
+    if (isPlaying) pause();
+    currentWordIndex = Number(event.target.value);
+    progress = currentWordIndex / words.length * 100;
+    lastPeriodicIndex = -1;
+    saveCurrentSession();
   }
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -408,6 +292,7 @@
       currentWordIndex = targetIndex;
       progress = (currentWordIndex / words.length) * 100;
     }
+    saveCurrentSession();
     showJumpTo = false;
     jumpToValue = "";
   }
@@ -417,6 +302,7 @@
     const targetIndex = Math.floor((percentage / 100) * words.length);
     currentWordIndex = Math.max(0, Math.min(words.length, targetIndex));
     progress = (currentWordIndex / words.length) * 100;
+    saveCurrentSession();
   }
 
   function skip(amount) {
@@ -434,19 +320,11 @@
   }
 
   function handleStartReading() {
-    start();
+    if (currentWordIndex >= words.length) restart(); else start();
   }
 
   function handleLoadContent() {
     showTextInput = true;
-  }
-
-  function handleShowPro() {
-    activeTab = 'settings';
-  }
-
-  function handleUpgradePrompt() {
-    activeTab = 'settings';
   }
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
@@ -467,10 +345,8 @@
           jumpToValue = "";
         } else if (showTextInput) {
           showTextInput = false;
-        } else if (isPlaying || isPaused) {
-          isPlaying = false;
-          isPaused = false;
-          if (intervalId) { clearTimeout(intervalId); intervalId = null; }
+        } else if (isFocusMode) {
+          stop();
         }
         break;
       case "KeyG":
@@ -495,18 +371,13 @@
         break;
       case "ArrowLeft":
         e.preventDefault();
-        if (currentWordIndex > 1) {
-          currentWordIndex = Math.max(0, currentWordIndex - 2);
-          progress = (currentWordIndex / words.length) * 100;
-        }
+        skip(-1);
         break;
       case "ArrowRight":
         e.preventDefault();
-        if (currentWordIndex < words.length) {
-          progress = ((currentWordIndex + 1) / words.length) * 100;
-          currentWordIndex++;
-        }
+        skip(1);
         break;
+
     }
   }
 
@@ -519,21 +390,62 @@
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-  onMount(async () => {
-    parseText();
-    window.addEventListener("keydown", handleKeydown);
-    if (hasSession()) loadSavedSession();
-    await libraryStore.init();
+  function background() { if (document.hidden) { if (isPlaying) pause(); else saveCurrentSession(); } }
+  onMount(() => {
+    let disposed = false;
+    window.addEventListener('keydown', handleKeydown);
+    document.addEventListener('visibilitychange', background);
+    window.addEventListener('pagehide', saveCurrentSession);
+    (async () => {
+      try {
+        const settings = JSON.parse(localStorage.getItem('imprint-settings') || 'null') || loadSession()?.settings;
+        if (settings) {
+          wordsPerMinute = settings.wordsPerMinute ?? 300;
+          fadeEnabled = settings.fadeEnabled ?? true;
+          fadeDuration = settings.fadeDuration ?? 150;
+          pauseOnPunctuation = settings.pauseOnPunctuation ?? true;
+          punctuationPauseMultiplier = settings.punctuationPauseMultiplier ?? 2;
+          wordLengthWPMMultiplier = settings.wordLengthWPMMultiplier ?? 5;
+          pauseAfterWords = settings.pauseAfterWords ?? 0;
+          pauseDuration = settings.pauseDuration ?? 500;
+          frameWordCount = settings.frameWordCount ?? 1;
+          focusPosition = settings.focusPosition ?? 40;
+        }
+        await libraryStore.init();
+        const id = localStorage.getItem('rsvp-active-book-id');
+        const book = id ? await libraryStore.getBook(id) : null;
+        if (disposed) return;
+        if (book?.raw_text_array?.length) await switchBook(book);
+        else {
+          const legacy = loadSession();
+          if (legacy?.text) {
+            const recovered = await ingestLocalFile({ title: 'Recovered reading', rawText: legacy.text });
+            await switchBook(recovered);
+            currentWordIndex = Math.min(legacy.currentWordIndex || 0, words.length);
+            progress = currentWordIndex / words.length * 100;
+            await saveCurrentSession();
+            clearSession();
+          }
+        }
+        if (disposed) return;
+        ready = true;
+        checkpointTimer = setInterval(() => { if (isPlaying) saveCurrentSession(); }, 2000);
+      } catch (error) { saveError = error.message; }
+    })();
+    return () => { disposed = true; };
   });
-
   onDestroy(() => {
-    if (intervalId) clearTimeout(intervalId);
-    if (fadeTimeoutId) clearTimeout(fadeTimeoutId);
-    window.removeEventListener("keydown", handleKeydown);
+    clearTimeout(intervalId); clearTimeout(fadeTimeoutId); clearTimeout(periodicTimeout);
+    clearInterval(checkpointTimer);
+    saveCurrentSession();
+    window.removeEventListener('keydown', handleKeydown);
+    document.removeEventListener('visibilitychange', background);
+    window.removeEventListener('pagehide', saveCurrentSession);
   });
 </script>
 
 <main class:focus-mode={isFocusMode}>
+  {#if saveError}<p class="save-error" role="alert">{saveError}</p>{/if}
   <!-- ══ FOCUS MODE (Reader) ═══════════════════════════════════════════════ -->
   {#if isFocusMode}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -556,6 +468,12 @@
       />
     </div>
 
+    {#if chapters.length > 0}
+      <select class="chapter-picker" aria-label="Choose chapter" value={currentChapter?.wordIndex ?? 0} on:change={selectChapter}>
+        {#each chapters as chapter}<option value={chapter.wordIndex}>{chapter.title}</option>{/each}
+      </select>
+    {/if}
+    {#if isPaused}<p class="reading-context">{words.slice(Math.max(0, currentWordIndex - 6), currentWordIndex + 6).join(' ')}</p>{/if}
     <!-- Bottom Bar -->
     <div class="bottom-bar">
       {#if isAndroid}
@@ -628,7 +546,6 @@
       {:else if activeTab === 'home'}
         <HomeView
           {currentFileName}
-          {currentBookId}
           {words}
           {currentWordIndex}
           {progress}
@@ -638,18 +555,12 @@
           on:startreading={handleStartReading}
           on:loadcontent={handleLoadContent}
           on:openbook={openBook}
-          on:showpro={handleShowPro}
         />
       {:else if activeTab === 'library'}
         <Library
           {currentBookId}
-          {wordsPerMinute}
           on:openbook={openBook}
-        />
-      {:else if activeTab === 'explore'}
-        <Explore
-          on:openbook={openBook}
-          on:upgradeprompt={handleUpgradePrompt}
+          on:addcontent={handleLoadContent}
         />
       {:else if activeTab === 'settings'}
         <Settings
@@ -712,6 +623,10 @@
 </main>
 
 <style>
+  .chapter-picker { position: absolute; top: 20px; left: 5%; width: 90%; background: #111; color: #ddd; border: 1px solid #444; padding: 12px; border-radius: 8px; z-index: 5; }
+  .reading-context { position: absolute; top: 65%; left: 10%; width: 80%; text-align: center; color: #aaa; }
+  .save-error { position: fixed; top: 0; left: 0; right: 0; padding: 12px; background: #542020; color: white; z-index: 500; }
+
   :global(body) {
     background-color: #000 !important;
     margin: 0;
